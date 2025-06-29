@@ -121,7 +121,6 @@ class Gonk(private val introRole: Long, private val staffRole: Long, private val
     override fun onMessageReactionAdd(event: MessageReactionAddEvent) {
         println()
         println("Message reaction add detected!")
-        event.retrieveMessage().queue()
         process(event, onAdd)
     }
 
