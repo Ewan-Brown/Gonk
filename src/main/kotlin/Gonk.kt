@@ -4,7 +4,6 @@ import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.Member
 import net.dv8tion.jda.api.entities.Role
 import net.dv8tion.jda.api.entities.channel.concrete.ThreadChannel
-import net.dv8tion.jda.api.events.Event
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent
 import net.dv8tion.jda.api.events.message.react.GenericMessageReactionEvent
 import net.dv8tion.jda.api.events.message.react.MessageReactionAddEvent
@@ -12,7 +11,7 @@ import net.dv8tion.jda.api.events.message.react.MessageReactionRemoveEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.requests.restaction.AuditableRestAction
 
-class TestListener(private val introRole: Long, private val staffRole: Long, private val introChannelName: String, private val eventsForumName: String) : ListenerAdapter() {
+class Gonk(private val introRole: Long, private val staffRole: Long, private val introChannelName: String, private val eventsForumName: String) : ListenerAdapter() {
 
     override fun onMessageReceived(event: MessageReceivedEvent) {
         println("Message received, created at ${event.message.timeCreated}")

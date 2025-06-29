@@ -27,6 +27,6 @@ fun main(token : Array<String>) {;
         }
     }
     println("Successfully connected")
-    api.addEventListener(TestListener(introRole, staffRole, introChannel, eventsChannel))
+    api.addEventListener(Gonk(introRole, staffRole, introChannel, eventsChannel))
 
 }
