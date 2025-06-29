@@ -1,5 +1,6 @@
 package org.ewan.mcviewer
 
+import net.dv8tion.jda.api.JDA
 import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.Member
 import net.dv8tion.jda.api.entities.Role
@@ -8,10 +9,58 @@ import net.dv8tion.jda.api.events.message.MessageReceivedEvent
 import net.dv8tion.jda.api.events.message.react.GenericMessageReactionEvent
 import net.dv8tion.jda.api.events.message.react.MessageReactionAddEvent
 import net.dv8tion.jda.api.events.message.react.MessageReactionRemoveEvent
+import net.dv8tion.jda.api.events.session.ReadyEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.requests.restaction.AuditableRestAction
 
-class Gonk(private val introRole: Long, private val staffRole: Long, private val introChannelName: String, private val eventsForumName: String) : ListenerAdapter() {
+class Gonk(val api: JDA, private val introRole: Long, private val staffRole: Long, private val introChannelName: String, private val eventsForumName: String) : ListenerAdapter() {
+
+    override fun onReady(event: ReadyEvent) {
+        println("Ready!!!")
+        super.onReady(event)
+        api.guilds.forEach { guild ->
+            val forum = guild.getForumChannelsByName(eventsForumName, false)
+            if(forum.size > 0){
+                val channels = forum[0].threadChannels
+                channels.forEach{ channel ->
+                    println("event thread name " + channel?.name)
+                    val channelName = channel!!.name
+                    val matchingRoles = guild.getRolesByName(channelName, false)
+                    println(matchingRoles)
+//
+                    val addRoles: () -> Unit = {
+                        print("adding roles to correct uesrs")
+                        api.getThreadChannelById(channel.idLong)!!.retrieveStartMessage().queue {
+                            for (reaction in it.reactions) {
+                                reaction.retrieveUsers().queue { users ->
+                                    users.forEach { user ->
+                                        guild.retrieveMemberById(user.idLong).queue { member ->
+                                            safelyModifyRole(matchingRoles[0], guild, member, Modifications.ADD)
+                                        }
+                                    }
+                                }
+                            }
+                        }}
+
+
+                    if (matchingRoles.isEmpty()) {
+                        println("Creating role [$channelName]")
+                        guild.createRole().setName(channelName).setMentionable(true).queue {
+                            println("successfully created role $channelName")
+                            addRoles()
+                        }
+                    }else{
+                        print("clearing existing users!")
+                        guild.members.forEach {member -> safelyModifyRole(matchingRoles[0], guild, member, Modifications.REMOVE)}
+                        println("done clearing!")
+                        addRoles()
+                    }
+
+                }
+            }
+        }
+        println("done readying")
+    }
 
     override fun onMessageReceived(event: MessageReceivedEvent) {
         println("Message received, created at ${event.message.timeCreated}")
@@ -23,10 +72,10 @@ class Gonk(private val introRole: Long, private val staffRole: Long, private val
         event.guild.addRoleToMember(event.author, event.guild.getRoleById(introRole)!!).queue({
             println("Successfully added intro role to author!")
         },
-        {
-            println("failed to add intro role to author")
-            it.printStackTrace()
-        })
+            {
+                println("failed to add intro role to author")
+                it.printStackTrace()
+            })
     }
 
     private fun process(event: GenericMessageReactionEvent, processSuccess: (GenericMessageReactionEvent) -> Unit) : Unit{
@@ -51,8 +100,8 @@ class Gonk(private val introRole: Long, private val staffRole: Long, private val
         REMOVE({guild, member, role -> guild.removeRoleFromMember(member, role)})
     }
 
-    private fun safelyModifyRole(role: Role, event: GenericMessageReactionEvent, member: Member, modifications: Modifications) {
-        modifications.a(event.guild, member, role).queue({
+    private fun safelyModifyRole(role: Role, guild: Guild, member: Member, modifications: Modifications) {
+        modifications.a(guild, member, role).queue({
             println("successfully ${modifications.name} role ${role.name} for user ${member.idLong}")
         }, {
             println("failed to ${modifications.name} role ${role.name} for user ${member.idLong}")
@@ -72,7 +121,7 @@ class Gonk(private val introRole: Long, private val staffRole: Long, private val
                     println("Creating role [$channelName]")
                     event.guild.createRole().setName(channelName).setMentionable(true).queue({
                         println("succesfully created role ${channelName}")
-                        safelyModifyRole(it, event, member, Modifications.ADD)
+                        safelyModifyRole(it, event.guild, member, Modifications.ADD)
                     }, {
                         println("failed to create role [$channelName]")
                         it.printStackTrace()
@@ -82,7 +131,7 @@ class Gonk(private val introRole: Long, private val staffRole: Long, private val
                     println("Matching role found : ${role}")
                     if(!member.roles.contains(role)){
                         println("user was not part of role, adding it!!")
-                        safelyModifyRole(role, event, member, Modifications.ADD)
+                        safelyModifyRole(role, event.guild, member, Modifications.ADD)
                     }else{
                         println("user is already part of role!")
                     }
@@ -90,7 +139,7 @@ class Gonk(private val introRole: Long, private val staffRole: Long, private val
             }, {
                 println("failed to retrieve member with id : ${event.userId}")
                 it.printStackTrace()
-        })
+            })
     }
 
     val onRemove: (GenericMessageReactionEvent) -> Unit = {
@@ -107,7 +156,7 @@ class Gonk(private val introRole: Long, private val staffRole: Long, private val
                     val role = matchingRoles[0]
                     println("Matching role found : ${role}")
                     if (member.roles.contains(role)) {
-                        safelyModifyRole(role, event, member, Modifications.REMOVE)
+                        safelyModifyRole(role, event.guild, member, Modifications.REMOVE)
                     } else {
                         println("user not part of role!")
                     }
