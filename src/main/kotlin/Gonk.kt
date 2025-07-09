@@ -5,6 +5,7 @@ import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.Member
 import net.dv8tion.jda.api.entities.Role
 import net.dv8tion.jda.api.entities.channel.concrete.ThreadChannel
+import net.dv8tion.jda.api.events.channel.ChannelDeleteEvent
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent
 import net.dv8tion.jda.api.events.message.react.GenericMessageReactionEvent
 import net.dv8tion.jda.api.events.message.react.MessageReactionAddEvent
@@ -13,59 +14,91 @@ import net.dv8tion.jda.api.events.session.ReadyEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.requests.restaction.AuditableRestAction
 
-class Gonk(val api: JDA, private val introRole: Long, private val staffRole: Long, private val introChannelName: String, private val eventsForumName: String) : ListenerAdapter() {
+class Gonk(val api: JDA, private val introRole: Long, private val doRetroactiveProcessing: Boolean, private val introChannelName: String, private val forumsToScan: List<String>) : ListenerAdapter() {
 
     override fun onReady(event: ReadyEvent) {
         println("Ready!!!")
         super.onReady(event)
-        api.guilds.forEach { guild ->
-            val forum = guild.getForumChannelsByName(eventsForumName, false)
-            if(forum.size > 0){
-                val channels = forum[0].threadChannels
-                channels.forEach{ channel ->
-                    println("event thread name " + channel?.name)
-                    val channelName = channel!!.name
-                    val matchingRoles = guild.getRolesByName(channelName, false)
-                    println(matchingRoles)
-//
-                    val addRoles: () -> Unit = {
-                        print("adding roles to correct uesrs")
-                        api.getThreadChannelById(channel.idLong)!!.retrieveStartMessage().queue {
-                            for (reaction in it.reactions) {
-                                reaction.retrieveUsers().queue { users ->
-                                    users.forEach { user ->
-                                        guild.retrieveMemberById(user.idLong).queue { member ->
-                                            safelyModifyRole(matchingRoles[0], guild, member, Modifications.ADD)
+        if(doRetroactiveProcessing) {
+            api.guilds.forEach { guild ->
+                forumsToScan.forEach { forumName ->
+                    val matchingForums = guild.getForumChannelsByName(forumName, false)
+                    if (matchingForums.size > 0) {
+                        val channels = matchingForums[0].threadChannels
+                        println("Forum discovered: " + matchingForums[0])
+                        channels.forEach { channel ->
+                            println("Forum post discovered: " + channel?.name)
+                            val channelName = channel!!.name
+
+                            val matchingRoles = guild.getRolesByName(channelName, false)
+                            println(matchingRoles)
+                            val addRoles: () -> Unit = {
+                                println("adding roles to correct users")
+                                api.getThreadChannelById(channel.idLong)!!.retrieveStartMessage().queue {
+                                    for (reaction in it.reactions) {
+                                        reaction.retrieveUsers().queue { users ->
+                                            users.forEach { user ->
+                                                guild.retrieveMemberById(user.idLong).queue { member ->
+                                                    safelyModifyRole(matchingRoles[0], guild, member, Modifications.ADD)
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }}
 
 
-                    if (matchingRoles.isEmpty()) {
-                        println("Creating role [$channelName]")
-                        guild.createRole().setName(channelName).setMentionable(true).queue {
-                            println("successfully created role $channelName")
-                            addRoles()
+                            if (matchingRoles.isEmpty()) {
+                                println("Creating role [$channelName]")
+                                guild.createRole().setName(channelName).setMentionable(true).queue {
+                                    println("successfully created role $channelName")
+                                    addRoles()
+                                }
+                            } else {
+                                println("clearing existing users!")
+                                guild.members.forEach { member ->
+                                    safelyModifyRole(
+                                        matchingRoles[0],
+                                        guild,
+                                        member,
+                                        Modifications.REMOVE
+                                    )
+                                }
+                                println("done clearing!")
+                                addRoles()
+                            }
+
                         }
-                    }else{
-                        print("clearing existing users!")
-                        guild.members.forEach {member -> safelyModifyRole(matchingRoles[0], guild, member, Modifications.REMOVE)}
-                        println("done clearing!")
-                        addRoles()
+                    } else {
+                        println("forum not found : $forumName")
                     }
-
                 }
+
             }
         }
         println("done readying")
     }
 
+    override fun onChannelDelete(event: ChannelDeleteEvent) {
+        super.onChannelDelete(event)
+        val matchingRoles = event.guild.getRolesByName(event.channel.name, false)
+        if(matchingRoles.size > 0) {
+            println("channel deleted, removing role ${matchingRoles[0]}")
+            event.guild.members.forEach { member ->
+                safelyModifyRole(
+                    matchingRoles[0],
+                    event.guild,
+                    member,
+                    Modifications.REMOVE
+                )
+            }
+            println("deleting role ${matchingRoles[0]}")
+            matchingRoles[0].delete().queue({ println("succesfully deleted role ") })
+        }
+    }
+
     override fun onMessageReceived(event: MessageReceivedEvent) {
-        println("Message received, created at ${event.message.timeCreated}")
         if (event.author.isBot || !event.channel.name.contains(introChannelName)) {
-            println("Message was bot or in wrong channel, returning")
             return
         }
         println("adding intro role to author!")
@@ -81,7 +114,7 @@ class Gonk(val api: JDA, private val introRole: Long, private val staffRole: Lon
     private fun process(event: GenericMessageReactionEvent, processSuccess: (GenericMessageReactionEvent) -> Unit) : Unit{
         if (event.channel is ThreadChannel) {
             val forumName = event.channel.asThreadChannel().parentChannel.name
-            if(forumName.equals(eventsForumName)){
+            if(forumsToScan.contains(forumName)) {
                 event.channel.asThreadChannel().retrieveStartMessage().queue({
                     if(it.idLong == event.messageIdLong){
                         println("identified as start message")
@@ -168,14 +201,10 @@ class Gonk(val api: JDA, private val introRole: Long, private val staffRole: Lon
     }
 
     override fun onMessageReactionAdd(event: MessageReactionAddEvent) {
-        println()
-        println("Message reaction add detected!")
         process(event, onAdd)
     }
 
     override fun onMessageReactionRemove(event: MessageReactionRemoveEvent) {
-        println()
-        println("Message reaction rem detected!")
         process(event, onRemove)
     }
 }

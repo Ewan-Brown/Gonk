@@ -10,9 +10,8 @@ fun main(token : Array<String>) {;
     var api: JDA
 
     val introRole = 1355324621032784013
-    val staffRole = 1037777604448632855
     val introChannel = "introductions"
-    val eventsChannel = "events"
+    val forums = listOf("events", "gaming")
 
     while(true) {
         try{
@@ -23,10 +22,10 @@ fun main(token : Array<String>) {;
             break
         }catch (e: ErrorResponseException){
             System.err.println("Failed to connect to network, trying again in 5s")
-            Thread.sleep(5000)
+            Thread.sleep(5000)  
         }
     }
     println("Successfully connected")
-    api.addEventListener(Gonk(api, introRole, staffRole, introChannel, eventsChannel))
+    api.addEventListener(Gonk(api, introRole, true, introChannel, forums))
 
 }
